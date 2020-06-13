@@ -39,10 +39,10 @@ theme_set(theme_bw())
 In general, this project will be composed of 4 parts: 
 (Notice that this part also includes corresponding **Member contributions**)
 
-- Data Exploration & Data Preprocessing (**Ye Tao**)
-- Feature Selection & Dimension Reduction (**Jennifer Wang**)
-- Modeling with various techniques: Xgboost and Random Forest(**Ye Tao**), Logistic regression(**Hyein Kang**), Decision tree(**Hyein Kang**)
-- Model Performance Evaluation & Comparison (**Ye Tao**)
+- Data Exploration & Data Preprocessing 
+- Feature Selection & Dimension Reduction 
+- Modeling with various techniques: Xgboost and Random Forest, Logistic regression, Decision tree 
+- Model Performance Evaluation & Comparison 
 
 
 <br>
