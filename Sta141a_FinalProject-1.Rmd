@@ -1,0 +1,560 @@
+---
+title: "Sta141a_Final Project"
+author: "Ye Tao"
+date: "12/09/2019"
+output: 
+  html_document:
+    toc: true
+    number_sections: true
+---
+
+
+```{r setup, include=FALSE, cache=TRUE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, 
+                      message = FALSE, fig.height = 5, fig.width = 10)
+```
+
+
+```{r}
+# loading Library
+library(tidyverse)
+library(ggcorrplot)
+library(GGally)
+library(skimr)
+library(corrplot)
+library(pROC)
+library(ggridges)
+library(caret)
+library(Rtsne)
+library(doParallel)
+library(rpart.plot)
+library(rpart)
+theme_set(theme_bw())
+```
+
+# **Introduction**
+
+**`Fraud`** attempts have seen a drastic increase in recent years, making fraud detection is more important than ever. For instance, recent research shows a typical organization loses 5% of revenues each year because of fraud with a median loss of $145,000 per case. Consequently in this project, we’re interested in **`Fraud Detection`**, and we will figure out an ML-based way for recognizing fraud activities with several features given. Notice that this should be a classification problem.
+
+In general, this project will be composed of 4 parts: 
+(Notice that this part also includes corresponding **Member contributions**)
+
+- Data Exploration & Data Preprocessing (**Ye Tao**)
+- Feature Selection & Dimension Reduction (**Jennifer Wang**)
+- Modeling with various techniques: Xgboost and Random Forest(**Ye Tao**), Logistic regression(**Hyein Kang**), Decision tree(**Hyein Kang**)
+- Model Performance Evaluation & Comparison (**Ye Tao**)
+
+
+<br>
+
+Key questions about the dataset:
+
+- How are a fraud and non-fraud classes different from each other?
+- When does fraud events tend to occur?
+- Which variable has the most contribution to our model?
+- What is the best model among these 4 modeling methodologies(model comparison)?
+
+
+
+```{r}
+# Laptop
+# data = readr::read_csv("c://Users//BOSS/Desktop/creditcard.csv")
+
+# Workstation
+data = readr::read_csv("C://Users//yetao//OneDrive//Desktop//creditcard.csv")
+data$Class = as.factor(data$Class)
+levels(data$Class) <- c("Not_Default", "Default")
+```
+
+# **Data Overview**
+
+```{r}
+# glimpse the data
+knitr::kable(skim(data), format = "markdown")
+```
+
+
+
+<br>
+
+# **Data Exploration**
+
+## **Data Imbalance Check**
+
+As we can see from the table below, This dataset has 284315 legitimate credit card transactions and only 492 problematic transactions. This is Data Imbalance and it is a common situation we need to deal with credit default detection projects.
+
+Because the dataset is extremely unbalanced. Even a Dumb classifier, which simply uses the frequency for prediction, would obtain around 99% accuracy on this task. This is clear that a simple measure of mean accuracy should not be used due to insensitivity to false negatives. However, the good news is that there’s no missing value in this dataset.
+
+```{r}
+class.number <- data %>% 
+  group_by(Class) %>% 
+  summarise(n = n())
+
+# Imbalanced Data Checking
+ggplot(data = class.number, aes(x = Class, y = n, fill = Class)) +
+    geom_bar(alpha = 0.4, stat = "identity") +
+    geom_text(aes(label = n)) + 
+    ggtitle("Bar Plot for Non-Default and Default") +
+    ylab("Number of transactions") +
+    scale_fill_discrete(name = "Class Type", labels = c("Non-Default", "Default")) + 
+    theme(legend.position = "bottom", legend.box = "horizontal")
+```
+
+Notice that since only `492` of all transactions are fraudulent, always predicting that a transaction is not fraudulent would lead to a low error rate. It is important to construct a model that performs better than this. In other words, training a Machine Learning Model with this imbalanced dataset, often causes the model to develop a certain bias towards the majority class. Also, we have to keep in mind that accuracy is no more important, but other criteria like specificity, ROC score, and many others needed to be calculated in this projection for the purpose of comparison.
+<br>
+
+## **Explore Difference betweem Default and Non-default class In Amount and Time**
+
+Recall that for privacy issues, v1 to v28 is all PCA transformed, which means that we have no idea what they should be. However, time and amount have physical meanings and therefore we can put particular attention on these two variables.
+
+### **Explore feature - Time**
+
+As the plot below suggests, we can see some differences between default and non-default transactions according to the time feature. For two shaded regions in the plot, we notice that the amount of innocent transactions within that two parts goes down. While the default one stays at a high position. This is probably because people who do non-fraudulent transactions are having sleep during those two periods of time. While the problematic transaction is more likely to occur during the night since crime might feel afraid to be caught while using fake credit cards during the daytime.
+
+```{r}
+# Density plot with time(0 & 1)
+p1 = ggplot(data = data, aes(x = Time, fill = Class)) +
+  geom_density(alpha = 0.3) +
+  scale_fill_discrete(name = "Class Type", labels = c("Non-Default", "Default")) + 
+  ggtitle("Density Plot - Variable Time (Fraud VS Non-Fraud)") + 
+  theme(legend.position = "bottom", legend.box = "horizontal")
+
+p1 +
+  annotate("rect", xmin = 0.95e5, xmax = 1.1e+5, ymin = 1e-06, ymax = 1.9e-06,
+  alpha = .4) +
+  annotate("rect", xmin = 1.2e4, xmax = 2.3e+4, ymin = 1e-06, ymax = 1.9e-06,
+  alpha = .4)
+```
+
+<br>
+
+Notice that the `Time` variable is not very significant is our model since it measures the seconds elapsed between each transaction and the first transaction in the dataset. It can not give us too much useful information, therefore we discard this variable in the following modeling parts.
+
+### **Explore Feature - Amount**
+
+```{r}
+# Density plot with time(0 & 1)
+p2 = ggplot(data = data, aes(x = Amount, fill = Class)) + 
+  geom_density(alpha = 0.3) +
+  scale_fill_discrete(name = "Class Type", labels = c("Non-Default", "Default")) + 
+  ggtitle("Density Plot - Variable Amount (Fraud VS Non-Fraud)") + 
+  theme(legend.position = "bottom", legend.box = "horizontal") + 
+  scale_x_log10() + 
+  xlim(0, 200) + ylim(0, 0.05)
+p2
+```
+
+The density plot shows the right skewness since most credit card transactions should be around a smaller amount of money. For example, buying a bottle of water or some sandwiches on the campus, and a small number of such people will use a credit card to buy some luxury goods. In addition to that, as the graph suggests above, generally speaking, the amount for default transaction is lower than the non default one. However, when the amount is around 100, the amount for the default part is much higher. So, we might conclude that default is more likely to occur when the amount is `$100`.
+
+### **Explore Remaining Features**
+
+In this section, we plot the distribution of every single feature corresponding to its distribution. Here are the criteria: If two distribution overlapped each other for a large part, that feature may not be helpful in distinguishing default and non-default. On the other hand, if two distributions separated from each other, the corresponding feature is good to include inside the model. However, we have to keep in mind that this part only gives us a general overview on which features might be significant. We will further check this importance of variable later by using `Random Forest` to calculate the importance of each feature.
+
+```{r,  fig.height = 5, fig.width = 10}
+data %>%
+  select(V1:V14, Class) %>% 
+  gather(A, B, -Class) %>% 
+  ggplot(aes(x = B, y = A, fill = Class)) + 
+  geom_density_ridges(alpha = 0.5) +
+  scale_x_log10() + 
+  ggtitle("Density Plot for each Variable") + 
+  xlab("Value") +
+  ylab("Variable Name")
+```
+
+According to the plot above, from v1 to v14, we can see two distributions of following features which somehow
+overlapped: `v1`, `v10`, `v12`, `v13`, `v14`, `v3`, `v5`, `v6`, `v7`, `v9`. And the remaining `v11`, `v2`, `v4`, `v8` show that their two distributions are sperated from each other, which might be suitable for modeling.
+
+
+```{r,  fig.height = 5, fig.width = 10}
+data %>%
+  select(V15:V28, Class) %>% 
+  gather(A, B, -Class) %>% 
+  ggplot(aes(x = B, y = A, fill = Class)) + 
+  geom_density_ridges(alpha = 0.5) +
+  scale_x_log10() + 
+  ggtitle("Density Plot for each Variable") + 
+  xlab("Value") + 
+  ylab("Variable Name")
+```
+
+So follow the same logic, we find two distributions of following features somehow overlapped: `v15`, `v16`, `v18`, `v22`, `v24`, `v25`, `v26`. And the remaining `v17`, `v19`, `v20`, `v21`, `v23`, `v27`, `v28` show that their two distributions are sperated from each other.
+
+<br>
+
+## **Corrlation Analysis for each feature**
+
+```{r,  fig.height = 5, fig.width = 10}
+corr.data = data %>%
+  select(-Class) %>% 
+  as.matrix() %>% 
+  cor()
+
+ggcorrplot(corr.data, hc.order = FALSE, type = "upper",
+   tl.srt = 90, lab = FALSE,
+   colors = c("#E46726", "white", "#6D9EC1")) + 
+  ggtitle("Correlation Pot for Each feature")
+```
+From the PLot above We know that
+
+- a moderate to strong positive correlation between Amount and V2.
+- a weak to moderate positive correlation between Amount and V5.
+- a moderate to strong positive correlation between Time and V3.
+- a very weak positive correlation between V11, V15, and V25.
+- a moderate to strong negative correlation between Amount and V7.
+- a very weak negative correlation between Amount and V20.
+- There are no significant correlation between either Amount or Time and the rest of the variables (V1, V4, V6, V8, V9, V10, V12, V13, V14, V16, V17, V18, V19, V21, V22, V23, V24, V26, V27, V28). 
+
+The graph above demonstrates that most of the data features are not correlated. As a reminder, most of the features were presented to a `Principal Component Analysis` (PCA) algorithm. The features `V1` to `V28` are most probably the Principal Components resulted after transforming the real features through `PCA.` However, we have no idea what the original features should be.
+
+
+# **Data Preprocessing**
+
+## **Normalization**
+```{r}
+ggplot(data = data, aes(x = Amount)) +
+  geom_histogram() +
+  xlim(0,5) +
+  ggtitle("Histogram of Amout(Non-Normalized)") +
+  ylab("Number of Transactions")
+```
+
+From the histogram above, we can see the distribution is right-skewed and it is not centered around its mean. Therefore, normalization is needed for the variable amount.
+
+
+
+```{r}
+normalize <- function(x){
+      return((x - mean(x, na.rm = TRUE))/sd(x, na.rm = TRUE))
+}
+data$Amount <- normalize(data$Amount)
+```
+
+Here is the distribution of amount after Normalizing
+
+```{r}
+ggplot(data = data, aes(x = Amount)) +
+  geom_histogram() +
+  xlim(0,5) +
+  ggtitle("Histogram of Amout(Normalized)") +
+  ylab("Number of Transactions")
+```
+
+<br>
+
+## **Visualizaition of high dimensional data**
+
+To try to understand the data better, we will try visualizing the data using `t-Distributed Stochastic Neighbour Embedding`, a technique to reduce dimensionality using Barnes-Hut approximations.
+
+To train the model, perplexity was set to `20`. There is no the "Best" value for perploexity and it is pretty robust when the value is between `0` and `50`.
+
+The visualization should give us a hint and a visual understanding of the dataset, which tells us whether there exist any discoverable patterns and structures hidden inside the data which the model could learn. If there is no obvious structure, it will be hard for our model to make predictions
+
+```{r, results= F}
+tsne.subset.data <- data %>% 
+    select(-c("Class", "Time")) %>% 
+    dplyr::slice(1 : (0.1 * nrow(data)))
+        
+tsne.result <- Rtsne(
+    tsne.subset.data,
+    perplexity = 20, # according to the parper perplexity had better stay within 0 and 50
+    theta = 0.5, 
+    pca = F,
+    verbose = T, 
+    max_iter = 500, 
+    check_duplicates = F
+)
+```
+
+```{r}
+tsne.subset.class = data %>% 
+    select(Class) %>% 
+    dplyr::slice(1: (0.1 * nrow(data)))
+
+tsne.subset.class = tsne.subset.class$Class %>% 
+    as.factor()
+
+tsne.result.data = tsne.result$Y %>% 
+    as.data.frame %>% 
+    cbind(tsne.subset.class)
+
+# Visualizetion
+ggplot(data = tsne.result.data, aes(x = V1, y = V2)) + 
+    geom_point(aes(color = tsne.subset.class), alpha = 0.5) + 
+    ggtitle("tsne visualization for credit card data") + 
+    theme(legend.box = "horizontal")
+```
+
+
+What we see from the graph above is pretty motivating. Most blue points(default transaction) are sitting outside the clustering red points (non-default data). This means that we can use some suitable models to find out the hidden pattern, which distinguishes fraud and non-fraud transactions.
+
+
+## **Data Balancing**
+
+Training a Machine Learning Model with this imbalanced dataset, often causes the model to develop a certain bias towards the majority class. For example, as mentioned, a simple naive classifer will give a extremely low error rate. And we need to data balance to correct this bias.
+
+- Brief description on `SMOTe`
+
+`SMOTe` is a technique based on nearest neighbors judged by Euclidean Distance between data points in feature space. Intead of using `Oversampling` and `Undersamping`, which we plan to use, we use SMOTe algorithm for balancing data simply beacuse we want to give unknown technique a try in this project.
+
+Very luckily, caret pipline package let us use `SMOTe` as easy as passing a paramater. Notice that my.control is a list of several settings which we will use later for fitting models.
+
+```{r}
+my.control = trainControl(method = "cv", number = 5, # use corss validation - 5 fold
+                          sampling = "smote", # smote for dealing with imbalanced data
+                          savePredictions = T,
+                          summaryFunction=twoClassSummary, # results summary function
+                          classProbs = TRUE)  # results summary function
+```
+
+
+# **Data Modeling**
+```{r}
+# Settings for training
+
+set.seed(2) # Set random seed 
+data$Class = as.factor(data$Class)
+
+# train & test split 7:3
+data.idx = caret::createDataPartition(data$Class, p = 0.7, list = FALSE)
+
+data.train = data[data.idx, ]
+data.test = data[-data.idx, ]
+```
+
+## **Baseline Model - Simple Logistic Model**
+
+Baseline model uses all the variables given by the dataset(even the `Time` variable) by fitting a simple lositic model. Here we only care about the model perfermance of the baseline model and will not go through details of this fitted model. The purpose of this model is only for the later model performance comparison. And after that What we will do later is try our best to create some models to beat this naive baeline one. As mentioned since accuracy(error rate) is no more important, we include other criterias like ROC, Sensitivity and Specificity 
+
+
+Here is the summary of baseline when fitting the training data. The result is really good-looking
+```{r}
+set.seed(2)
+# Baseline Model
+# fitting logistic model with all varibles
+baseline.glm.model <- train(
+    form = Class ~. , 
+    data = data.train,
+    trControl = my.control,
+    method = "glm",
+    family = "binomial",
+    metric = "ROC"
+)
+
+baseline.glm.model$results[2:4] %>% knitr::kable()
+```
+
+<br>
+
+Let's see how the baseline model perform on the unseen test data.
+
+```{r}
+confoundMat <- confusionMatrix(predict(baseline.glm.model, data.test), data.test$Class)
+```
+
+<br>
+
+```{r}
+confoundMat$table %>% knitr::kable(format = "markdown")
+```
+
+
+According to the model summary and the confusion matrix given above, after using k - fold, k = 5, we know a couple of things:
+
+In addition, confusion matrix demonstrates that false positive value = `1430` And in defualt detection setting, this means that there are `1430` legimate transactions we falsely detect as illegal one. And we fasely detect `18` illegimate transaction as innocent.
+
+In addition to that, for the baseline, Sensitivity: `0.9832345`, Specificity: `0.8775510`, Neg Pred Value	`0.0827453`
+
+
+<br>
+
+```{r}
+confoundMat$byClass %>% knitr::kable(format = "markdown")
+```
+
+So our goal is pretty clear right now, we need to find some other better models to make some improvments particularly on Neg Pred Value and Specificity. In other words, to improve the ability of not classifyinng innocent as illegimate transaction.
+
+## **Random Forest**
+```{r}
+set.seed(2)
+# parallel processing
+workers = makePSOCKcluster(5)
+registerDoParallel(workers)
+
+random.forest.model <- train(
+  form = Class ~., 
+  data = select(data.train, -Time), 
+  method = "rf",
+  trControl = my.control, 
+  importance = TRUE,
+  metric = "ROC"
+)
+```
+
+```{r}
+confoundMat2 <- confusionMatrix(predict(random.forest.model, data.test), data.test$Class)
+confoundMat2$table %>% knitr::kable(format = "markdown")
+```
+
+<br>
+
+```{r}
+confoundMat2$byClass %>% knitr::kable(format = "markdown")
+```
+
+To my surprise, Random forest's performance on test data is much worse than the one of our baseline model.
+
+- Random forest:  Sensitivity : 0.97906, Specificity : 0.82313,  Neg Pred Value : 0.06345, 
+- Baseline Model: Sensitivity	0.9832345, Specificity	0.8775510, Neg Pred Value	0.0827453
+
+In addition
+
+- Random forest treat 1786 innocent transactions as problematic, and fasely accept 26 illegimated one as legal ones.
+- Baseline, there are 1430 legimate transactions we falsely detect as illegal one, and only fasely detect 18 illegimate transaction as innocent.
+
+My guess for why random foerest performs worse is that the model is probably overfitted
+
+
+
+
+### **Importance of Variables by RF model**
+
+Let's check which feature  random forest measure as the most contribution 
+
+```{r}
+ggplot(varImp(random.forest.model)) +
+  ggtitle("Importance of Variable")
+```
+
+For random forest, the most important variable is `V14` and the Second is `V4` and so on so forth.
+
+let's compare the first five features. Variables pick by Random Forest somehow come agreement with our intuitive undertanding about each feature. The below shows that two distributions of  `V4` are pretty serpeated. While `V14` seems not.
+
+```{r}
+data %>%
+  select(V14, V4, Amount, V7, V11, V8, Class) %>% 
+  gather(A, B, -Class) %>% 
+  ggplot(aes(x = B, y = A, fill = Class)) + 
+  geom_density_ridges(alpha = 0.5) +
+  scale_x_log10() + 
+  ggtitle("Density Plot for each Variable") + 
+  xlab("Value") + 
+  ylab("Variable Name")
+```
+
+## **Dimension Reduction & Decision Tree**
+  
+After use random forest for dimension reduction, we the use the features that random forest model picked in the previous part to fit the decision tree. Let's see how the new model performs.
+
+```{r}
+dtree_fit1 <- train(Class ~ V14 + V4 + Amount + V7 + V11, 
+                  data = data.train, method = "rpart",
+                  parms = list(split = "information"),
+                  trControl=my.control,
+                  tuneLength = 10)
+
+prp(dtree_fit1$finalModel, box.palette = "Reds", tweak = 1.2)
+
+```
+
+
+```{r}
+predict(dtree_fit1, newdata = data.test[1,])
+test_pred1 <- predict(dtree_fit1, newdata = data.test)
+confoundMat4 = confusionMatrix(test_pred1, data.test$Class )
+confoundMat4$byClass %>% knitr::kable(format = "markdown")
+```
+
+```{r}
+confoundMat4$table %>% knitr::kable(format = "markdown")
+```
+
+
+
+From the confusion matrix, we see that Decision model (after dimension reduced by Random Forest) predicted `4088` transactions to be fraud when they are actually not fraud. We also predicted 23 non-fraud transaction when they are fraud. Sensitivity : `0.9520717`, Specificity : `0.850347`, Neg Pred Value : `0.0296381`. Decision tree perform worse than our baseline and it is understandable. Since this model is very easy to overfit if we do not including pre-prune and post prune part in modeling decision tree.
+
+
+
+## **Xgboost**
+```{r}
+set.seed(2)
+# parallel processing
+workers = makePSOCKcluster(5)
+registerDoParallel(workers)
+
+xgboost.model <- train(Class~., 
+  data = select(data.train, -Time), 
+                  method = "xgbTree",
+                  trControl = my.control,
+                  metric = "ROC")
+
+stopCluster(workers)
+```
+
+
+
+```{R}
+confoundMat3 <- confusionMatrix(predict(xgboost.model, data.test), data.test$Class)
+confoundMat3$byClass %>% knitr::kable(format = "markdown")
+confoundMat3$table %>% knitr::kable(format = "markdown")
+```
+The resulting metrics indicate that our `XGBoost` model performance on the new, never-before-analyzed test data. This time the `XGBoost` algorithm makes a big improvement compared with our baseline model. Particular, the negative predictive value rises to 0.1046129. Around 1087 innocent transactions are treated as default by the bootstrap models for this time. Comapre with our baseline, `XGBoost` shows its power.
+
+# **Overall Model Comparison**
+
+```{r,  fig.height = 5, fig.width = 10}
+
+model.test.comparison = rbind(confoundMat$byClass[1:5], 
+confoundMat2$byClass[1:5],
+confoundMat3$byClass[1:5], 
+confoundMat4$byClass[1:5]) %>% as.data.frame()
+
+rownames(model.test.comparison) <- c("Baseline", "RandomForest", "XGBoost", "Decision Tree")
+model.test.comparison$Model = c("Baseline", "RandomForest", "XGBoost", "Decision Tree")
+```
+
+
+```{r}
+model.test.comparison %>% knitr::kable(format = "markdown")
+```
+
+
+```{r}
+model.test.comparison1 = model.test.comparison %>% 
+  gather(A, B, -Model)
+
+ggplot(model.test.comparison1, aes(x = A, y = B, fill = Model)) +
+  geom_bar(stat = "identity", alpha = 0.5) +
+  facet_grid(~Model) +
+  coord_flip() + 
+  ylim(0, 1.5) +
+  geom_text(aes(label = round(B, 4)), hjust = 0.2) + 
+  theme(legend.position = "bottom", legend.box = "horizontal") + 
+  ggtitle("Model Performance on Test Dataset") +
+  theme(axis.text.x=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank())
+```
+
+For `Specificity` random forest model performed the worse but Baseline Model performed the best. For `Sensitivity`, `Precision` and `Positive Prediction Value`, all models have roughly the same performance.
+
+In gernerally, `XGBoost` does the best job especially on improving the `Negative predction Value`, which is the metrics we put particular attentionon, and lifts it into `0.1046`, which means that `XGBoost` detects `10` percent of frauldent transactions are truly not frauldent ones.
+
+
+
+<br>
+
+
+# **Conclusion**
+
+In general, we see that the `XGBoost` has the best performance among all the models. On the other hand, the random forest model has the surprisingly bad performance, it might be due to the overfitting. We know that the random-forest model is a very advanced model, for future plan, we need to find out what criteria are causing this problem. We could also use fine-tuning to improve the whole model performance For the decision tree model, we can use post-prune and pre-prune 
+
+In addition to that, for the purposes of business use, we might also include some other metrics like execution time and interpretability for eacg model.
+
+
+
+```{r, ref.label=knitr::all_labels(),echo=TRUE,eval=FALSE}
+```
+
+
+
