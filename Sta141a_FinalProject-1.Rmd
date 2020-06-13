@@ -1,6 +1,5 @@
 ---
 title: "Sta141a_Final Project"
-author: "Ye Tao"
 date: "12/09/2019"
 output: 
   html_document:
@@ -37,7 +36,6 @@ theme_set(theme_bw())
 **`Fraud`** attempts have seen a drastic increase in recent years, making fraud detection is more important than ever. For instance, recent research shows a typical organization loses 5% of revenues each year because of fraud with a median loss of $145,000 per case. Consequently in this project, we’re interested in **`Fraud Detection`**, and we will figure out an ML-based way for recognizing fraud activities with several features given. Notice that this should be a classification problem.
 
 In general, this project will be composed of 4 parts: 
-(Notice that this part also includes corresponding **Member contributions**)
 
 - Data Exploration & Data Preprocessing 
 - Feature Selection & Dimension Reduction 
